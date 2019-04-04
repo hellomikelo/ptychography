@@ -1,8 +1,8 @@
 # ptycho
-MATLAB implementation of ePIE and simulation.
+Ptychography simulation code, with MATLAB implementation of ePIE and simulation scripts.
 
 Files:
-* main_simulation.m - Main simulation code for generating and reconstructing data. Run this.
-* ePIE.m - Code for doing ptychography reconstruction 
-* ptychography_simulator.m - Code for generating simulated ptychography data 
+* __main_simulation.m__ - Main simulation code for generating and reconstructing data. Run this.
+* __ePIE.m__ - Code for doing ptychography reconstruction 
+* __ptychography_simulator.m__ - Code for generating simulated ptychography data 
 

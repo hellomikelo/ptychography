@@ -1,4 +1,4 @@
-function [best_obj, aperture, fourier_error, initial_obj] = ePIE(ePIE_inputs,varargin)
+function [best_obj, aperture, fourier_error, px_pos] = ePIE(ePIE_inputs,varargin)
 % ePIE algorithm for ptychography phase retrieval.
 % 
 % Reference: Maiden & Rodenburg, Ultramicroscopy (2009) 
@@ -34,8 +34,8 @@ diff_pats       = ePIE_inputs.Patterns;
     fourier_error = zeros(iterations, num_apertures);
 positions       = ePIE_inputs.Positions;
     % get the coordinates for cropping out each scan area
-    pxPos = Convert_to_Pixel_Positions(positions, px_size);
-    [Xmin, Ymin, Xmax, Ymax] = Find_Scan_Area(pxPos);
+   px_pos = Convert_to_Pixel_Positions(positions, px_size);
+    [Xmin, Ymin, Xmax, Ymax] = Find_Scan_Area(px_pos);
 big_obj         = ePIE_inputs.InitialObj;
 aperture_radius = ePIE_inputs.ApRadius;
 aperture        = ePIE_inputs.InitialAp;
@@ -157,7 +157,7 @@ for itt = 1:iterations
         drawnow 
         
         %%% Save intermediate progress
-        if 0; 
+        if 1; 
             export_fig(['../results/' filename '.png']); 
             save(['../results/' filename '_checkpoint.mat'], 'itt', 'best_obj','aperture','fourier_error','-v7.3'); 
         end

@@ -39,6 +39,6 @@ ePIE_inputs(1).GpuFlag = 0;
 ePIE_inputs(1).ApRadius = 5;
 ePIE_inputs(1).showim = 4;
 
-ePIE(ePIE_inputs);
+[best_obj, aperture, fourier_error, px_pos] = ePIE(ePIE_inputs);
 
 disp('Reconstruction complete!')

@@ -1,4 +1,11 @@
 function [big_obj,aperture,fourier_error,initial_obj,initial_aperture, images] = rPIE(ePIE_inputs,varargin)
+% 
+% rPIE for ptychography reconstruction. See Maiden, Johnson and Li Optica (2017)
+% 
+% Originally by: Minh Pham / Arjuna Rana
+% Edited by Mike Lo
+% Date: 20190408
+% 
 %varargin = {beta_obj, beta_ap}
 optional_args = {0.05 .1}; %default values for varargin parameters
 rng('shuffle','twister');
@@ -18,6 +25,8 @@ big_obj = ePIE_inputs(1).InitialObj;
 aperture_radius = ePIE_inputs(1).ApRadius;
 aperture = ePIE_inputs(1).InitialAp;
 iterations = ePIE_inputs(1).Iterations;
+filename        = ePIE_inputs.FileName;
+
 %% parameter inputs
 if isfield(ePIE_inputs, 'updateAp')
     update_aperture = ePIE_inputs.updateAp;
@@ -65,7 +74,7 @@ fprintf('positivity = %d\n', do_posi);
 fprintf('misc notes: %s\n', miscNotes);
 %% Define parameters from data and for reconstruction
 for ii = 1:size(diffpats,3)
-    diffpats(:,:,ii) = fftshift(sqrt(diffpats(:,:,ii)));
+    diffpats(:,:,ii) = fftshift((diffpats(:,:,ii)));
 end
 diffpats = single(diffpats);
 [y_kspace,~] = size(diffpats(:,:,1)); % Size of diffraction patterns
@@ -165,41 +174,62 @@ for itt = 1:iterations
     end
     %scale = max(max(abs(aperture))); aperture = aperture/scale;
     
-    if  mod(itt,showim) == 0 && imout == 1;
-        
-        figure(3)
-        
-        %hsv_big_obj = make_hsv(big_obj,1);
-        hsv_aper = make_hsv(aperture,1);
-        subplot(2,2,1)
-        imagesc(abs(big_obj)); axis image; colormap gray; title(['reconstruction pixel size = ' num2str(pixel_size)] )
-        subplot(2,2,2)
-        imagesc(hsv_aper); axis image; colormap gray; title('aperture single'); colorbar
-        subplot(2,2,3)
-        errors = sum(fourier_error,2)/nApert;
-        fprintf('%d. Error = %f, scale = %f\n',itt,errors(itt),max(max(abs(aperture))));
-        plot(errors); ylim([0,0.2]);
-        subplot(2,2,4)
-        imagesc(log(fftshift(check_dp))); axis image
-        drawnow 
-        
-        %figure(9)
-        %image_i = abs(big_obj(276:555,276:555));
-        %imagesc(image_i); axis image; colormap(jet)
-        %images(:,:,itt) = image_i;
-        %drawnow        
-        
-    end
     
-%     toc
-%     tic
-        
-     mean_err = sum(fourier_error(itt,:),2)/nApert;
+    mean_err = sum(fourier_error(itt,:),2)/nApert;
     if best_err > mean_err
         best_obj = big_obj;
         best_err = mean_err;
-    end         
+    end 
     
+    if  mod(itt,showim) == 0 && imout == 1;
+        errors = sum(fourier_error,2)/nApert;
+        fprintf('%d. Error = %f, max(probe) = %f\n', itt, errors(itt), max(max(abs(aperture))));        
+        
+        figure(3); set(gcf, 'color', 'w', 'position', [95 621 1383 428]); colormap gray
+        subplot(1,6,1:2)
+            imagesc(abs(best_obj)); axis image off; colorbar
+            title(['Object, itr ' num2str(itt)])
+%             title(['reconstruction pixel size = ' num2str(pixel_size)] )
+        subplot(1,6,3:4)
+            imagesc((abs(aperture))); axis image off; colorbar
+            title('Probe');
+        subplot(1,6,5)
+            plot(errors, 'linewidth', 2); axis square % ylim([0,0.2]); 
+            title(sprintf('Avg Fourier error\n(%.5f)', errors(itt)))
+        subplot(1,6,6)
+            imagesc(log(fftshift(check_dp))); axis image off
+            title('K-space')
+        drawnow 
+        
+        %%% Save intermediate progress
+        if 1; 
+            export_fig(['../results/rPIE/' filename '.png']); 
+            save(['../results/rPIE/' filename '_checkpoint.mat'], 'itt', 'best_obj','aperture','fourier_error','-v7.3'); 
+        end  
+        
+%         figure(3)
+%         
+%         %hsv_big_obj = make_hsv(big_obj,1);
+%         hsv_aper = make_hsv(aperture,1);
+%         subplot(2,2,1)
+%         imagesc(abs(big_obj)); axis image; colormap gray; title(['reconstruction pixel size = ' num2str(pixel_size)] )
+%         subplot(2,2,2)
+%         imagesc(hsv_aper); axis image; colormap gray; title('aperture single'); colorbar
+%         subplot(2,2,3)
+%         errors = sum(fourier_error,2)/nApert;
+%         fprintf('%d. Error = %f, scale = %f\n',itt,errors(itt),max(max(abs(aperture))));
+%         plot(errors); ylim([0,0.2]);
+%         subplot(2,2,4)
+%         imagesc(log(fftshift(check_dp))); axis image
+%         drawnow 
+%         
+%         %figure(9)
+%         %image_i = abs(big_obj(276:555,276:555));
+%         %imagesc(image_i); axis image; colormap(jet)
+%         %images(:,:,itt) = image_i;
+%         %drawnow        
+        
+    end
     
 end
 disp('======reconstruction finished=======')

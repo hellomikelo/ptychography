@@ -1,4 +1,4 @@
-function [best_obj, aperture, fourier_error, px_pos] = ePIE(ePIE_inputs,varargin)
+function [best_obj, aperture, fourier_error, initial_obj, initial_aperture, px_pos] = ePIE(ePIE_inputs,varargin)
 % ePIE algorithm for ptychography phase retrieval.
 % 
 % Reference: Maiden & Rodenburg, Ultramicroscopy (2009) 
@@ -29,12 +29,11 @@ px_size         = ePIE_inputs.PixelSize;
 diff_pats       = ePIE_inputs.Patterns;
     % preprocess the patterns
     for ii = 1:size(diff_pats,3), diff_pats(:,:,ii) = single(fftshift(diff_pats(:,:,ii))); end
-    [little_area, ~] = size(diff_pats(:,:,1)); % Size of diffraction patterns
-    num_apertures = size(diff_pats,3);
+    [little_area, ~, num_apertures] = size(diff_pats); % Size of diffraction patterns
     fourier_error = zeros(iterations, num_apertures);
 positions       = ePIE_inputs.Positions;
     % get the coordinates for cropping out each scan area
-   px_pos = Convert_to_Pixel_Positions(positions, px_size);
+    px_pos = Convert_to_Pixel_Positions(positions, px_size);
     [Xmin, Ymin, Xmax, Ymax] = Find_Scan_Area(px_pos);
 big_obj         = ePIE_inputs.InitialObj;
 aperture_radius = ePIE_inputs.ApRadius;
@@ -53,16 +52,20 @@ clear ePIE_inputs
 % initialize big object
 if big_obj == 0
     big_obj = single(rand(bigx,bigy)).*exp(1i*(rand(bigx,bigy))) *1e2;
+    initial_obj = big_obj;    
 else
     big_obj = single(big_obj);
+    initial_obj = big_obj;
 end
 best_obj = big_obj;
 
 % initialize probe
 if aperture == 0
     aperture = single(Make_Circle_Mask(round(aperture_radius./px_size),little_area));
+    initial_aperture = aperture;    
 else
     aperture = single(aperture); 
+    initial_aperture = aperture;    
 end
 
 if gpu == 1
@@ -161,7 +164,6 @@ for itt = 1:iterations
             export_fig(['../results/' filename '.png']); 
             save(['../results/' filename '_checkpoint.mat'], 'itt', 'best_obj','aperture','fourier_error','-v7.3'); 
         end
-        
     end    
 end
 disp('====== ePIE: Reconstruction finished')

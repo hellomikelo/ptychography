@@ -1,6 +1,12 @@
-%% sir-DR reconstruction algorithm
-
 function [big_obj,aperture,fourier_error,initial_obj,initial_aperture] = DRb(ePIE_inputs,varargin)
+%% sir-DR reconstruction algorithm
+% This version has been edited to have more consistent formatting with the
+% ePIE.m
+% 
+% Originally by: Minh Pham
+% Edited by Mike Lo
+% Date: 20190408
+% 
 %varargin = {beta_obj, beta_ap, probeNorm, init_weight, final_weight, order, semi_implicit_P}
 rng('shuffle','twister');
 %% setup working and save directories
@@ -9,23 +15,27 @@ save_string = [ dir '/Results_ptychography/']; % Place to save results
 imout = 1; % boolean to determine whether to monitor progress or not
 
 %% Load inputs from struct
-gpu = ePIE_inputs(1).GpuFlag;
-diffpats = ePIE_inputs(1).Patterns;
-positions = ePIE_inputs(1).Positions;
-pixel_size = ePIE_inputs(1).PixelSize;
-big_obj = ePIE_inputs(1).InitialObj;
-aperture_radius = ePIE_inputs(1).ApRadius;
-aperture = ePIE_inputs(1).InitialAp;
-iterations = ePIE_inputs(1).Iterations;
-update_aperture = ePIE_inputs.updateAp;
-showim = ePIE_inputs(1).showim;
+iterations =        ePIE_inputs(1).Iterations;
+px_size =           ePIE_inputs(1).PixelSize;
+gpu =               ePIE_inputs(1).GpuFlag;
+diff_pats =          ePIE_inputs(1).Patterns;
+    for ii = 1:size(diff_pats,3), diff_pats(:,:,ii) = single(fftshift((diff_pats(:,:,ii)))); end
+    [little_area, ~, num_apertures] = size(diff_pats); % Size of diffraction patterns
+    fourier_error = zeros(iterations, num_apertures);
+positions =         ePIE_inputs(1).Positions;
+    % get the coordinates for cropping out each scan area
+    px_pos = Convert_to_Pixel_Positions(positions, px_size);
+    [Xmin, Ymin, Xmax, Ymax] = Find_Scan_Area(px_pos);
+big_obj =           ePIE_inputs(1).InitialObj;
+aperture_radius =   ePIE_inputs(1).ApRadius;
+aperture =          ePIE_inputs(1).InitialAp;
+update_aperture =   ePIE_inputs.updateAp;
+showim =            ePIE_inputs(1).showim;
+filename =          ePIE_inputs.FileName;
+
 if isfield(ePIE_inputs, 'do_posi'); do_posi = ePIE_inputs.do_posi;
 else do_posi = 0; end
-if isfield(ePIE_inputs, 'save_intermediate');
-    save_intermediate = ePIE_inputs.save_intermediate;
-else
-    save_intermediate = 0;
-end
+
 %% === Reconstruction parameters frequently changed === %%
 freeze_aperture = Inf;
 optional_args = {.9, .1, 0.9, 1, 0.2, 0.6, 4, 0}; %default values for varargin parameters
@@ -43,26 +53,10 @@ fprintf('probe norm = %d\n', probeNorm);
 fprintf('Initial weight = %.2f, final weight = %.2f, order = %d\n',init_weight, final_weight, order)
 fprintf('semi implicit on P = %d\n',semi_implicit_P);
 clear ePIE_inputs
-%% Define parameters from data and for reconstruction
-for ii = 1:size(diffpats,3)
-    diffpats(:,:,ii) = fftshift(sqrt(diffpats(:,:,ii)));
-end
-diffpats = single(diffpats);
-[y_kspace,~] = size(diffpats(:,:,1)); % Size of diffraction patterns
-[N1,N2,nApert] = size(diffpats);
-little_area = y_kspace; % Region of reconstruction for placing back into full size image
-%% Get centre positions for cropping (should be a 2 by n vector)
-%positions = convert_to_pixel_positions(positions,pixel_size);
-[pixelPositions, bigx, bigy] = ...
-    convert_to_pixel_positions_testing5(positions,pixel_size,little_area);
-centrey = round(pixelPositions(:,2));
-centrex = round(pixelPositions(:,1));
-centBig = round((bigx+1)/2);
-Y1 = centrey - floor(y_kspace/2); Y2 = Y1+y_kspace-1;
-X1 = centrex - floor(y_kspace/2); X2 = X1+y_kspace-1;
+
 %% create initial aperture?and object guesses
 if aperture == 0
-    aperture = single(((2*makeCircleMask(round(aperture_radius./pixel_size),little_area))));
+    aperture = single(((2*makeCircleMask(round(aperture_radius./px_size),little_area))));
     aperture = my_ifft(aperture);
     initial_aperture = aperture;
 else
@@ -70,29 +64,17 @@ else
     initial_aperture = aperture;
 end
 if big_obj == 0
-    big_obj = single(rand(bigx,bigy)).*exp(1i*(rand(bigx,bigy)));
+    big_obj = single(rand(bigx,bigy)).*exp(1i*(rand(bigx,bigy)))*1e2;
     %big_obj = zeros(bigx,bigy);
     initial_obj = big_obj;
 else
     big_obj = single(big_obj);
     initial_obj = big_obj;
 end
-if save_intermediate == 1
-    inter_obj = zeros([size(big_obj) floor(iterations/10)]);
-    inter_frame = 0;
-else inter_obj = [];
-end
 
-[XX,YY] = meshgrid(1:bigx,1:bigy);
-X_cen = floor(bigx/2); Y_cen = floor(bigy/2);
-R2 = (XX-X_cen).^2 + (YY-Y_cen).^2;
-Kfilter = exp(-R2/(2*400)^2);
-Kfilter = Kfilter/max(Kfilter(:));
-
-fourier_error = zeros(iterations,nApert);
 if strcmp(gpu,'GPU')
     display('========ePIE DR reconstructing with GPU========')
-    diffpats = gpuArray(diffpats);
+    diff_pats = gpuArray(diff_pats);
     fourier_error = gpuArray(fourier_error);
     big_obj = gpuArray(big_obj);
     aperture = gpuArray(aperture);
@@ -100,7 +82,8 @@ else
     display('========ePIE DR reconstructing with CPU========')
 end
 best_err = 100; % check to make sure saving reconstruction with best error
-Z = diffpats.*exp(rand(N1,N2,nApert)); ds=1;
+Z = diff_pats.*exp(rand(little_area,little_area,num_apertures)); 
+ds=1;
 % user can choose the weight sequence how slowly it increases
 % weight in (0,1)
 % weight starts at a small value, such as 0.2 and then slowly increase to
@@ -109,12 +92,12 @@ Z = diffpats.*exp(rand(N1,N2,nApert)); ds=1;
 % my default function is a step monomial function of order 4th, 
 % initial value=0.2, final value =0.6
 %images = zeros(380,380,iterations);
-fprintf('Number of diff patterns = %d\n',size(diffpats,3));
+fprintf('Number of diff patterns = %d\n', num_apertures);
 %weights = init_weight + 0.5*(final_weight-init_weight)*round(2*((1:iterations)/iterations).^order);
 weights = init_weight + (final_weight-init_weight)*((1:iterations)/iterations).^order;
 %beta = sqrt((iterations-(1:iterations))/iterations); weights = init_weight*beta + (1-beta)*final_weight;
 
-fprintf('big_obj size = %dx%d, aperture size = %dx%d, pixel_size = %f\n',size(big_obj), size(aperture),pixel_size);
+fprintf('big_obj size = %dx%d, aperture size = %dx%d, pixel_size = %f\n',size(big_obj), size(aperture),px_size);
 %% Main ePIE itteration loop
 disp('========beginning reconstruction=======');
 for t = 1:iterations
@@ -132,10 +115,10 @@ for t = 1:iterations
     end
     %}
     %% sequential
-    for aper = randperm(nApert)
+    for aper = randperm(num_apertures)
         %bigObjShifted = circshift(big_obj, [-1*(centrey(aper) - centBig) -1*(centrex(aper) - centBig)]);
         %u_old = croppedOut(bigObjShifted,y_kspace); % size 384x384
-        u_old = big_obj(Y1(aper):Y2(aper), X1(aper):X2(aper));
+        u_old = big_obj(Ymin(aper):Ymax(aper), Xmin(aper):Xmax(aper));
         %object_max = max(abs(u_old(:))).^2;
         probe_max = max(abs(aperture(:))).^2;
 %% Create new exitwave
@@ -146,13 +129,13 @@ for t = 1:iterations
         z = Z(:,:,aper);
         z_F = (1+alpha)*z_u - alpha*z;
         
-        diffpat_i = diffpats(:,:,aper);
+        diffpat_i = diff_pats(:,:,aper);
         missing_data = diffpat_i == -1; 
         k_fill = z_F(missing_data);
         
         % update z: tunning weight
         phase = angle(z_F);
-        z_F =  (1-weight)*exp(1i*phase) .* diffpats(:,:,aper) + weight*z_F ;
+        z_F =  (1-weight)*exp(1i*phase) .* diff_pats(:,:,aper) + weight*z_F ;
         z_F(missing_data) = k_fill;
         z = z_F + alpha*(z- z_u);
         Z(:,:,aper)=z;        
@@ -167,9 +150,9 @@ for t = 1:iterations
         if do_posi, u_new = max(0,real(u_new));
         else u_new = u_temp; end
 
-        big_obj(Y1(aper):Y2(aper), X1(aper):X2(aper)) = u_new;
+        big_obj(Ymin(aper):Ymax(aper), Xmin(aper):Xmax(aper)) = u_new;
 %% Update the probe
-        if update_aperture == 1 
+        if update_aperture ~= 0 && update_aperture > t
             object_max = max(abs(u_new(:))).^2;
             if t > iterations - freeze_aperture
                 new_beta_ap = beta_ap*sqrt((iterations-t+1)/iterations);
@@ -190,51 +173,65 @@ for t = 1:iterations
     if probeNorm == 1
         aperture = aperture/scale;
     end
-    %{
-    if t>iterations-100
-    z = fftshift(fft2(big_obj)).*Kfilter;
-    big_obj = ifft2(ifftshift(z));
-    end
-    %}
-      %% show results
-    if  mod(t,showim) == 0 && imout == 1;        
-        figure(333)       
-        %hsv_big_obj = make_hsv(big_obj,1);
-        hsv_aper = make_hsv(aperture,1);
-        subplot(2,2,1)
-        imagesc(abs(big_obj)); axis image; colormap gray; title(['reconstruction pixel size = ' num2str(pixel_size)] )
-        subplot(2,2,2)
-        imagesc(hsv_aper); axis image; colormap gray; title('aperture single'); colorbar
-        subplot(2,2,3)
-        errors = sum(fourier_error,2)/nApert;
-        fprintf('%d. Error = %f, scale = %.3f, dt = %.4f, ds = %.4f, weight = %.2f\n',t,errors(t),scale,dt, ds, weight);        
-        plot(errors); ylim([0,0.5]);
-        subplot(2,2,4)
-        imagesc(log(fftshift(check_dp))); axis image
-        drawnow     
-        %figure(39);
-        %img_i = abs(big_obj(276:555,276:555));
-        %images(:,:,t) = img_i;
-        %imagesc(img_i); axis image; colormap(jet); colorbar;
-        %drawnow;
-        %drawnow
-        %writeVideo(writerObj,getframe(h)); % take screen shot        
-    end
-        
-    mean_err = sum(fourier_error(t,:),2)/nApert;
+    
+    mean_err = sum(fourier_error(t,:),2)/num_apertures;
     if best_err > mean_err
         best_obj = big_obj;
         best_err = mean_err;
-    end         
-    if save_intermediate == 1 && mod(t,10) == 0
-        inter_frame = inter_frame + 1;
-%         save(['inter_output_ePIE_ID_',jobID,'_itt_',num2str(itt),'.mat'],...
-%         'best_obj','aperture','fourier_error','-v7.3');
-        inter_obj(:,:,inter_frame) = best_obj;
+    end       
+    
+      %% show results
+    if  mod(t,showim) == 0 && imout == 1;    
+        errors = sum(fourier_error,2)/num_apertures;
+        fprintf('%d. Error = %f, max(probe) = %f\n', t, errors(t), max(max(abs(aperture))));        
+        
+        figure(3); set(gcf, 'color', 'w', 'position', [95 621 1383 428]); colormap gray
+        subplot(1,6,1:2)
+            imagesc(abs(best_obj)); axis image off; colorbar
+            title(['Object, itr ' num2str(t)])
+%             title(['reconstruction pixel size = ' num2str(pixel_size)] )
+        subplot(1,6,3:4)
+            imagesc((abs(aperture))); axis image off; colorbar
+            title('Probe');
+        subplot(1,6,5)
+            plot(errors, 'linewidth', 2); axis square % ylim([0,0.2]); 
+            title(sprintf('Avg Fourier error\n(%.5f)', errors(t)))
+        subplot(1,6,6)
+            imagesc(log(fftshift(check_dp))); axis image off
+            title('K-space')
+        drawnow 
+        
+        %%% Save intermediate progress
+        if 1; 
+            export_fig(['../results/DR/' filename '.png']); 
+            save(['../results/DR/' filename '_checkpoint.mat'], 't', 'best_obj','aperture','fourier_error','-v7.3'); 
+        end    
+        
+%         figure(333)       
+%         %hsv_big_obj = make_hsv(big_obj,1);
+%         hsv_aper = make_hsv(aperture,1);
+%         subplot(2,2,1)
+%         imagesc(abs(big_obj)); axis image; colormap gray; title(['reconstruction pixel size = ' num2str(pixel_size)] )
+%         subplot(2,2,2)
+%         imagesc(hsv_aper); axis image; colormap gray; title('aperture single'); colorbar
+%         subplot(2,2,3)
+%         errors = sum(fourier_error,2)/nApert;
+%         fprintf('%d. Error = %f, scale = %.3f, dt = %.4f, ds = %.4f, weight = %.2f\n',t,errors(t),scale,dt, ds, weight);        
+%         plot(errors); ylim([0,0.5]);
+%         subplot(2,2,4)
+%         imagesc(log(fftshift(check_dp))); axis image
+%         drawnow     
+%         %figure(39);
+%         %img_i = abs(big_obj(276:555,276:555));
+%         %images(:,:,t) = img_i;
+%         %imagesc(img_i); axis image; colormap(jet); colorbar;
+%         %drawnow;
+%         %drawnow
+%         %writeVideo(writerObj,getframe(h)); % take screen shot        
     end
+
 end
 disp('======reconstruction finished=======')
-
 
 drawnow
 
@@ -247,6 +244,34 @@ end
 
 %save([save_string 'best_obj_' filename '.mat'],'best_obj','aperture','initial_obj','initial_aperture','fourier_error');
 
+
+    %% =======================================================================
+    % HELPER FUNCTIONS
+    % ========================================================================
+    function [positions] = Convert_to_Pixel_Positions(positions, pixel_size)
+        % Convert experimental scan coordinates into pixel units
+        positions = positions./pixel_size;
+        positions(:,1) = (positions(:,1)-min(positions(:,1)));
+        positions(:,2) = (positions(:,2)-min(positions(:,2)));
+        positions(:,1) = (positions(:,1)-round(max(positions(:,1))/2));
+        positions(:,2) = (positions(:,2)-round(max(positions(:,2))/2));
+        positions = round(positions);
+        bigx = little_area + max(positions(:))*2+10; % Field of view for full object
+        bigy = little_area + max(positions(:))*2+10;
+        big_cent = floor(bigx/2)+1;
+        positions = positions+big_cent;
+    end
+
+    function [Xmin, Ymin, Xmax, Ymax] = Find_Scan_Area(pxPos)
+        % Get the pixel extents of scan area: xmin, xmax, ymin, max
+        yScanCens= round(pxPos(:,2));
+        xScanCens = round(pxPos(:,1));
+        % Define coordinates covering the extent of each scan position
+        Ymin = yScanCens - floor(little_area/2); 
+        Ymax = Ymin + little_area-1; 
+        Xmin = xScanCens - floor(little_area/2); 
+        Xmax = Xmin + little_area-1;
+    end
 
 %% Function for converting positions from experimental geometry to pixel geometry
 
